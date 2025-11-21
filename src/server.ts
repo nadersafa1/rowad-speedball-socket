@@ -43,16 +43,7 @@ app.use(express.json())
 
 // Request logging middleware (for debugging)
 app.use((req, res, next) => {
-  console.log(
-    `[${new Date().toISOString()}] ${req.method} ${req.path} - IP: ${
-      req.ip
-    } - Headers:`,
-    {
-      host: req.headers.host,
-      'user-agent': req.headers['user-agent'],
-      'x-forwarded-for': req.headers['x-forwarded-for'],
-    }
-  )
+  console.log(`${req.method} ${req.path} - ${req.ip}`)
   next()
 })
 
