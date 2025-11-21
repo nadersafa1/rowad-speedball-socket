@@ -18,20 +18,13 @@ export interface ValidationResult {
 
 /**
  * Validates if a set score can be updated
+ * Note: Equal scores are allowed during the match, only rejected when marking as played
  */
 export const validateSetScore = async (
   setId: string,
   registration1Score: number,
   registration2Score: number
 ): Promise<ValidationResult> => {
-  // Check if scores are equal (draw not allowed)
-  if (registration1Score === registration2Score) {
-    return {
-      valid: false,
-      error: 'Cannot update set: scores are equal (draw not allowed)',
-    }
-  }
-
   // Check if scores are non-negative
   if (registration1Score < 0 || registration2Score < 0) {
     return {
