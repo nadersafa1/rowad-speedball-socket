@@ -81,6 +81,11 @@ io.on('connection', async (socket) => {
     SocketController.updateMatchStatus(io, socket, userData, data)
   )
 
+  // Handle create set event (admin only)
+  socket.on(SOCKET_EVENTS.CREATE_SET, (data) =>
+    SocketController.createSet(io, socket, userData, data)
+  )
+
   // Handle disconnection
   socket.on('disconnect', (reason) => {
     SocketController.handleDisconnect(io, socket)

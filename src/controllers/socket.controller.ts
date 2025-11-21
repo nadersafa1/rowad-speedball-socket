@@ -1,7 +1,7 @@
 import { Server, Socket } from 'socket.io'
-import { eq } from 'drizzle-orm'
+import { eq, asc } from 'drizzle-orm'
 import { db } from '../config/db.config'
-import { matches, sets } from '../db/schema'
+import { matches, sets, events } from '../db/schema'
 import { validateSession, UserData } from '../middlewares/auth.middleware'
 import {
   validateSetScore,
@@ -19,6 +19,8 @@ import {
   MatchStatusUpdatedData,
   SetCompletedData,
   MatchCompletedData,
+  CreateSetData,
+  SetCreatedData,
 } from '../types/socket.types'
 
 export class SocketController {
@@ -435,6 +437,167 @@ export class SocketController {
       )
 
       console.log(`Admin ${userData.id} updated match ${matchId} status`)
+    } catch (error) {
+      socket.emit(
+        SOCKET_EVENTS.ERROR,
+        error instanceof Error ? error.message : 'Unknown error'
+      )
+    }
+  }
+
+  /**
+   * Create a new set (admin only)
+   */
+  static createSet = async (
+    io: Server,
+    socket: Socket,
+    userData: UserData,
+    data: CreateSetData
+  ): Promise<void> => {
+    try {
+      // Check admin permission
+      if (!userData.isAdmin) {
+        socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.NOT_ADMIN)
+        return
+      }
+
+      const { matchId, setNumber } = data
+
+      if (!matchId) {
+        socket.emit(SOCKET_EVENTS.ERROR, 'Match ID is required')
+        return
+      }
+
+      // Get match
+      const matchResults = await db
+        .select()
+        .from(matches)
+        .where(eq(matches.id, matchId))
+        .limit(1)
+
+      if (matchResults.length === 0) {
+        socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.MATCH_NOT_FOUND)
+        return
+      }
+
+      const match = matchResults[0]
+
+      // Validate match is not completed
+      if (match.played) {
+        socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.MATCH_ALREADY_PLAYED)
+        return
+      }
+
+      // Validate match date is set
+      if (!match.matchDate) {
+        socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.MATCH_DATE_REQUIRED)
+        return
+      }
+
+      // Get event to determine bestOf
+      const eventResults = await db
+        .select()
+        .from(events)
+        .where(eq(events.id, match.eventId))
+        .limit(1)
+
+      if (eventResults.length === 0) {
+        socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.EVENT_NOT_FOUND)
+        return
+      }
+
+      const event = eventResults[0]
+      const bestOf = event.bestOf
+
+      // Get existing sets for the match
+      const existingSets = await db
+        .select()
+        .from(sets)
+        .where(eq(sets.matchId, matchId))
+        .orderBy(asc(sets.setNumber))
+
+      // Calculate set number if not provided
+      let calculatedSetNumber: number
+      if (setNumber !== undefined) {
+        calculatedSetNumber = setNumber
+      } else {
+        // Auto-calculate as next sequential number
+        calculatedSetNumber = existingSets.length + 1
+      }
+
+      // Validate set number doesn't exceed bestOf
+      if (calculatedSetNumber > bestOf) {
+        socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.MAX_SETS_REACHED)
+        return
+      }
+
+      // Validate set number doesn't already exist
+      const setNumberExists = existingSets.some(
+        (s) => s.setNumber === calculatedSetNumber
+      )
+      if (setNumberExists) {
+        socket.emit(
+          SOCKET_EVENTS.ERROR,
+          `Set number ${calculatedSetNumber} already exists for this match`
+        )
+        return
+      }
+
+      // Validate all previous sets are played (if any exist)
+      if (existingSets.length > 0) {
+        const previousSets = existingSets.filter(
+          (s) => s.setNumber < calculatedSetNumber
+        )
+        const unplayedPreviousSets = previousSets.filter((s) => !s.played)
+
+        if (unplayedPreviousSets.length > 0) {
+          socket.emit(
+            SOCKET_EVENTS.ERROR,
+            ERROR_MESSAGES.PREVIOUS_SETS_NOT_PLAYED
+          )
+          return
+        }
+      }
+
+      // Create set with initial scores (0-0)
+      const newSet = await db
+        .insert(sets)
+        .values({
+          matchId,
+          setNumber: calculatedSetNumber,
+          registration1Score: 0,
+          registration2Score: 0,
+          played: false,
+        })
+        .returning()
+
+      if (newSet.length === 0) {
+        socket.emit(SOCKET_EVENTS.ERROR, 'Failed to create set')
+        return
+      }
+
+      const createdSet = newSet[0]
+
+      // Emit set created event to all users in the match room
+      const setCreatedData: SetCreatedData = {
+        matchId,
+        set: {
+          id: createdSet.id,
+          matchId: createdSet.matchId,
+          setNumber: createdSet.setNumber,
+          registration1Score: createdSet.registration1Score,
+          registration2Score: createdSet.registration2Score,
+          played: createdSet.played,
+          createdAt: createdSet.createdAt,
+          updatedAt: createdSet.updatedAt,
+        },
+      }
+
+      io.to(`match_${matchId}`).emit(SOCKET_EVENTS.SET_CREATED, setCreatedData)
+
+      console.log(
+        `Admin ${userData.id} created set ${createdSet.id} (set ${calculatedSetNumber}) for match ${matchId}`
+      )
     } catch (error) {
       socket.emit(
         SOCKET_EVENTS.ERROR,
