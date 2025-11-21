@@ -41,9 +41,35 @@ app.options('*', cors())
 // Parse JSON bodies
 app.use(express.json())
 
+// Request logging middleware (for debugging)
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path} - ${req.ip}`)
+  next()
+})
+
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    service: 'Rowad Speedball Socket Server',
+    status: 'running',
+    socketPath: '/socket.io',
+    healthCheck: '/health',
+    timestamp: new Date().toISOString(),
+  })
+})
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() })
+})
+
+// 404 handler for undefined routes
+app.use((req, res) => {
+  res.status(404).json({
+    error: 'Not Found',
+    message: `Route ${req.method} ${req.path} not found`,
+    availableRoutes: ['GET /', 'GET /health', 'WS /socket.io'],
+  })
 })
 
 // Socket connection handler
