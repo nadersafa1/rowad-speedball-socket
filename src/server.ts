@@ -76,9 +76,9 @@ io.on('connection', async (socket) => {
     SocketController.updateSetScore(io, socket, userData, data)
   )
 
-  // Handle update match status event (admin only)
-  socket.on(SOCKET_EVENTS.UPDATE_MATCH_STATUS, (data) =>
-    SocketController.updateMatchStatus(io, socket, userData, data)
+  // Handle update match event (admin only)
+  socket.on(SOCKET_EVENTS.UPDATE_MATCH, (data) =>
+    SocketController.updateMatch(io, socket, userData, data)
   )
 
   // Handle create set event (admin only)

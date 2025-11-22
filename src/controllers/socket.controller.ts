@@ -14,9 +14,9 @@ import {
   JoinMatchData,
   LeaveMatchData,
   UpdateSetScoreData,
-  UpdateMatchStatusData,
+  UpdateMatchData,
   MatchScoreUpdatedData,
-  MatchStatusUpdatedData,
+  MatchUpdatedData,
   SetCompletedData,
   MatchCompletedData,
   CreateSetData,
@@ -319,16 +319,16 @@ export class SocketController {
             matchCompletedData
           )
 
-          // Also emit match status updated
-          const matchStatusData: MatchStatusUpdatedData = {
+          // Also emit match updated
+          const matchUpdatedData: MatchUpdatedData = {
             matchId,
             played: true,
             winnerId: matchCompletion.winnerId,
           }
 
           io.to(`match_${matchId}`).emit(
-            SOCKET_EVENTS.MATCH_STATUS_UPDATED,
-            matchStatusData
+            SOCKET_EVENTS.MATCH_UPDATED,
+            matchUpdatedData
           )
         }
       }
@@ -345,13 +345,14 @@ export class SocketController {
   }
 
   /**
-   * Update match status (admin only)
+   * Update match (admin only)
+   * Supports updating played status and matchDate
    */
-  static updateMatchStatus = async (
+  static updateMatch = async (
     io: Server,
     socket: Socket,
     userData: UserData,
-    data: UpdateMatchStatusData
+    data: UpdateMatchData
   ): Promise<void> => {
     try {
       // Check admin permission
@@ -360,7 +361,7 @@ export class SocketController {
         return
       }
 
-      const { matchId, played } = data
+      const { matchId, played, matchDate } = data
 
       if (!matchId) {
         socket.emit(SOCKET_EVENTS.ERROR, 'Match ID is required')
@@ -381,62 +382,81 @@ export class SocketController {
 
       const match = matchResults[0]
 
-      // If setting played = true, validate match completion
-      if (played === true && !match.played) {
-        const validation = await validateMatchCompletion(matchId)
-
-        if (!validation.valid) {
-          socket.emit(SOCKET_EVENTS.ERROR, validation.error)
-          return
-        }
-
-        // Update match with winner
-        await db
-          .update(matches)
-          .set({
-            played: true,
-            winnerId: validation.winnerId,
-            updatedAt: new Date(),
-          })
-          .where(eq(matches.id, matchId))
-
-        // Emit match completed event
-        if (validation.winnerId) {
-          const matchCompletedData: MatchCompletedData = {
-            matchId,
-            winnerId: validation.winnerId,
-          }
-
-          io.to(`match_${matchId}`).emit(
-            SOCKET_EVENTS.MATCH_COMPLETED,
-            matchCompletedData
-          )
-        }
-      } else if (played === false && match.played) {
-        // Allow unmarking as played (admin only)
-        await db
-          .update(matches)
-          .set({
-            played: false,
-            winnerId: null,
-            updatedAt: new Date(),
-          })
-          .where(eq(matches.id, matchId))
+      // Build update object
+      const updateData: {
+        played?: boolean
+        winnerId?: string | null
+        matchDate?: string | null
+        updatedAt: Date
+      } = {
+        updatedAt: new Date(),
       }
 
-      // Emit match status updated
-      const matchStatusData: MatchStatusUpdatedData = {
+      // Handle played status update
+      if (played !== undefined) {
+        // If setting played = true, validate match completion
+        if (played === true && !match.played) {
+          const validation = await validateMatchCompletion(matchId)
+
+          if (!validation.valid) {
+            socket.emit(SOCKET_EVENTS.ERROR, validation.error)
+            return
+          }
+
+          // Update match with winner
+          updateData.played = true
+          updateData.winnerId = validation.winnerId
+
+          // Emit match completed event
+          if (validation.winnerId) {
+            const matchCompletedData: MatchCompletedData = {
+              matchId,
+              winnerId: validation.winnerId,
+            }
+
+            io.to(`match_${matchId}`).emit(
+              SOCKET_EVENTS.MATCH_COMPLETED,
+              matchCompletedData
+            )
+          }
+        } else if (played === false && match.played) {
+          // Allow unmarking as played (admin only)
+          updateData.played = false
+          updateData.winnerId = null
+        }
+      }
+
+      // Handle matchDate update
+      if (matchDate !== undefined) {
+        updateData.matchDate = matchDate || null
+      }
+
+      // Update match in database
+      await db.update(matches).set(updateData).where(eq(matches.id, matchId))
+
+      // Get updated match to include in response
+      const updatedMatchResults = await db
+        .select()
+        .from(matches)
+        .where(eq(matches.id, matchId))
+        .limit(1)
+
+      const updatedMatch = updatedMatchResults[0]
+
+      // Emit match updated event
+      const matchUpdatedData: MatchUpdatedData = {
         matchId,
-        played,
-        winnerId: played ? match.winnerId || null : null,
+        played: updatedMatch.played,
+        matchDate: updatedMatch.matchDate || undefined,
+        winnerId: updatedMatch.winnerId || null,
       }
 
       io.to(`match_${matchId}`).emit(
-        SOCKET_EVENTS.MATCH_STATUS_UPDATED,
-        matchStatusData
+        SOCKET_EVENTS.MATCH_UPDATED,
+        matchUpdatedData
       )
 
-      console.log(`Admin ${userData.id} updated match ${matchId} status`)
+      console.log(`Admin ${userData.id} updated match ${matchId}`)
     } catch (error) {
       socket.emit(
         SOCKET_EVENTS.ERROR,

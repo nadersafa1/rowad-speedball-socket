@@ -27,9 +27,10 @@ export interface UpdateSetScoreData {
   played?: boolean
 }
 
-export interface UpdateMatchStatusData {
+export interface UpdateMatchData {
   matchId: string
-  played: boolean
+  played?: boolean
+  matchDate?: string // ISO date string (YYYY-MM-DD)
 }
 
 export interface MatchScoreUpdatedData {
@@ -41,9 +42,10 @@ export interface MatchScoreUpdatedData {
   played: boolean
 }
 
-export interface MatchStatusUpdatedData {
+export interface MatchUpdatedData {
   matchId: string
-  played: boolean
+  played?: boolean
+  matchDate?: string
   winnerId?: string | null
 }
 

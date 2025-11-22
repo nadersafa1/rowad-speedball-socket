@@ -4,12 +4,12 @@ export const SOCKET_EVENTS = {
   JOIN_MATCH: 'join-match',
   LEAVE_MATCH: 'leave-match',
   UPDATE_SET_SCORE: 'update-set-score',
-  UPDATE_MATCH_STATUS: 'update-match-status',
+  UPDATE_MATCH: 'update-match',
   CREATE_SET: 'create-set',
 
   // Server -> Client
   MATCH_SCORE_UPDATED: 'match-score-updated',
-  MATCH_STATUS_UPDATED: 'match-status-updated',
+  MATCH_UPDATED: 'match-updated',
   SET_COMPLETED: 'set-completed',
   MATCH_COMPLETED: 'match-completed',
   SET_CREATED: 'set-created',
