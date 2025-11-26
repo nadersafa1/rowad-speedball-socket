@@ -7,7 +7,6 @@ import {
   validateSetScore,
   validateSetPlayed,
   validateMatchCompletion,
-  checkMajorityAndCompleteMatch,
 } from '../utils/validation'
 import { SOCKET_EVENTS, ERROR_MESSAGES } from '../config/constants'
 import {
@@ -305,32 +304,8 @@ export class SocketController {
           setCompletedData
         )
 
-        // Check if match should be auto-completed (majority reached)
-        const matchCompletion = await checkMajorityAndCompleteMatch(matchId)
-
-        if (matchCompletion.completed && matchCompletion.winnerId) {
-          const matchCompletedData: MatchCompletedData = {
-            matchId,
-            winnerId: matchCompletion.winnerId,
-          }
-
-          io.to(`match_${matchId}`).emit(
-            SOCKET_EVENTS.MATCH_COMPLETED,
-            matchCompletedData
-          )
-
-          // Also emit match updated
-          const matchUpdatedData: MatchUpdatedData = {
-            matchId,
-            played: true,
-            winnerId: matchCompletion.winnerId,
-          }
-
-          io.to(`match_${matchId}`).emit(
-            SOCKET_EVENTS.MATCH_UPDATED,
-            matchUpdatedData
-          )
-        }
+        // Note: Match completion is handled by the REST API to ensure
+        // registration standings are updated correctly
       }
 
       console.log(

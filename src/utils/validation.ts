@@ -242,6 +242,10 @@ export const validateMatchCompletion = async (
 
 /**
  * Checks if a player has reached majority and match should be auto-completed
+ * 
+ * @deprecated This function is no longer used by the socket service.
+ * Match completion is handled by the REST API to ensure registration standings
+ * are updated correctly. This function is kept for reference but should not be called.
  */
 export const checkMajorityAndCompleteMatch = async (
   matchId: string
