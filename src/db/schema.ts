@@ -24,6 +24,28 @@ export const user = pgTable('user', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 })
 
+// Organization Plugin Tables (for better-auth organization plugin compatibility)
+export const organization = pgTable('organization', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull(),
+  slug: text('slug').notNull().unique(),
+  logo: text('logo'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  metadata: text('metadata'),
+})
+
+export const member = pgTable('member', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id')
+    .notNull()
+    .references(() => organization.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  role: text('role').default('member').notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+})
+
 export const session = pgTable('session', {
   id: uuid('id').primaryKey().defaultRandom(),
   expiresAt: timestamp('expires_at').notNull(),
@@ -34,6 +56,10 @@ export const session = pgTable('session', {
     .notNull()
     .references(() => user.id, { onDelete: 'cascade' }),
   impersonatedBy: text('impersonated_by'),
+  activeOrganizationId: uuid('active_organization_id').references(
+    () => organization.id,
+    { onDelete: 'set null' }
+  ),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 })
@@ -48,6 +74,9 @@ export const events = pgTable('events', {
   visibility: text('visibility', { enum: ['public', 'private'] })
     .notNull()
     .default('public'),
+  organizationId: uuid('organization_id').references(() => organization.id, {
+    onDelete: 'cascade',
+  }),
   registrationStartDate: date('registration_start_date'),
   registrationEndDate: date('registration_end_date'),
   eventDates: text('event_dates').array(), // Array of date strings
@@ -94,6 +123,8 @@ export const sets = pgTable('sets', {
 // Type exports
 export type User = typeof user.$inferSelect
 export type Session = typeof session.$inferSelect
+export type Organization = typeof organization.$inferSelect
+export type Member = typeof member.$inferSelect
 export type Event = typeof events.$inferSelect
 export type Match = typeof matches.$inferSelect
 export type Set = typeof sets.$inferSelect

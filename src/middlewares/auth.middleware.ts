@@ -1,6 +1,6 @@
 import { eq, and, gt } from 'drizzle-orm'
 import { db } from '../config/db.config'
-import { session, user } from '../db/schema'
+import { session, user, member } from '../db/schema'
 import { ERROR_MESSAGES } from '../config/constants'
 
 export interface UserData {
@@ -10,6 +10,11 @@ export interface UserData {
   emailVerified: boolean
   role: string | null
   isAdmin: boolean
+  activeOrganizationId?: string | null
+  organizationMemberships?: Array<{
+    organizationId: string
+    role: string
+  }>
 }
 
 export interface AuthResult {
@@ -22,9 +27,7 @@ export interface AuthResult {
  * Validates better-auth session token and returns user data
  * Checks session expiration, user verification, and admin status
  */
-export const validateSession = async (
-  token: string
-): Promise<AuthResult> => {
+export const validateSession = async (token: string): Promise<AuthResult> => {
   try {
     if (!token) {
       return {
@@ -37,12 +40,7 @@ export const validateSession = async (
     const sessions = await db
       .select()
       .from(session)
-      .where(
-        and(
-          eq(session.token, token),
-          gt(session.expiresAt, new Date())
-        )
-      )
+      .where(and(eq(session.token, token), gt(session.expiresAt, new Date())))
       .limit(1)
 
     if (sessions.length === 0) {
@@ -95,6 +93,15 @@ export const validateSession = async (
     // For now, we'll check if role contains 'admin' or use a permission check
     const isAdmin = await checkAdminPermission(userData.id)
 
+    // Get organization memberships (optional, for future use)
+    const memberships = await db
+      .select({
+        organizationId: member.organizationId,
+        role: member.role,
+      })
+      .from(member)
+      .where(eq(member.userId, userData.id))
+
     return {
       success: true,
       userData: {
@@ -104,6 +111,11 @@ export const validateSession = async (
         emailVerified: userData.emailVerified,
         role: userData.role,
         isAdmin,
+        activeOrganizationId: sessionData.activeOrganizationId || null,
+        organizationMemberships: memberships.map((m) => ({
+          organizationId: m.organizationId,
+          role: m.role,
+        })),
       },
     }
   } catch (error) {
@@ -117,8 +129,10 @@ export const validateSession = async (
 
 /**
  * Checks if user has admin permissions
- * better-auth admin plugin typically stores permissions in a separate table
- * For now, we check user.role or can be extended to query permissions table
+ * Matches frontend logic: checks if user.role === 'admin'
+ * Note: Frontend also checks permissions via better-auth API, but since socket server
+ * doesn't have access to better-auth API, we use the role check which is the primary indicator.
+ * Users with role='admin' are system admins with full access.
  */
 const checkAdminPermission = async (userId: string): Promise<boolean> => {
   try {
@@ -134,16 +148,10 @@ const checkAdminPermission = async (userId: string): Promise<boolean> => {
 
     const userData = users[0]
 
-    // Check if role indicates admin
-    // better-auth admin plugin might use role 'admin' or check permissions
-    // This is a simplified check - can be extended based on better-auth implementation
-    if (userData.role && userData.role.toLowerCase().includes('admin')) {
-      return true
-    }
-
-    // TODO: If better-auth uses a separate permissions table, query it here
-    // For now, return false if role doesn't indicate admin
-    return false
+    // Check if role is exactly 'admin' (matches frontend: session.user.role === 'admin')
+    // Frontend also checks permissions via auth.api.userHasPermission, but role check
+    // is the primary indicator for system admin status
+    return userData.role === 'admin'
   } catch (error) {
     console.error('Error checking admin permission:', error)
     return false
@@ -153,9 +161,7 @@ const checkAdminPermission = async (userId: string): Promise<boolean> => {
 /**
  * Validates that user is admin
  */
-export const requireAdmin = async (
-  token: string
-): Promise<AuthResult> => {
+export const requireAdmin = async (token: string): Promise<AuthResult> => {
   const authResult = await validateSession(token)
 
   if (!authResult.success || !authResult.userData) {
@@ -171,4 +177,3 @@ export const requireAdmin = async (
 
   return authResult
 }
-

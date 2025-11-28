@@ -8,6 +8,10 @@ import {
   validateSetPlayed,
   validateMatchCompletion,
 } from '../utils/validation'
+import {
+  checkMatchAccess,
+  checkEventUpdateAuthorization,
+} from '../utils/authorization'
 import { SOCKET_EVENTS, ERROR_MESSAGES } from '../config/constants'
 import {
   JoinMatchData,
@@ -138,15 +142,13 @@ export class SocketController {
         return
       }
 
-      // Verify match exists
-      const matchResults = await db
-        .select()
-        .from(matches)
-        .where(eq(matches.id, matchId))
-        .limit(1)
-
-      if (matchResults.length === 0) {
-        socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.MATCH_NOT_FOUND)
+      // Check authorization to access this match
+      const accessCheck = await checkMatchAccess(userData, matchId)
+      if (!accessCheck.authorized) {
+        socket.emit(
+          SOCKET_EVENTS.ERROR,
+          accessCheck.error || 'Access denied'
+        )
         return
       }
 
@@ -191,7 +193,7 @@ export class SocketController {
   }
 
   /**
-   * Update set score (admin only)
+   * Update set score (admin/coach/owner only)
    */
   static updateSetScore = async (
     io: Server,
@@ -200,16 +202,66 @@ export class SocketController {
     data: UpdateSetScoreData
   ): Promise<void> => {
     try {
-      // Check admin permission
-      if (!userData.isAdmin) {
-        socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.NOT_ADMIN)
-        return
-      }
-
       const { setId, registration1Score, registration2Score, played } = data
 
       if (!setId) {
         socket.emit(SOCKET_EVENTS.ERROR, 'Set ID is required')
+        return
+      }
+
+      // Get set data to find match
+      const setResults = await db
+        .select()
+        .from(sets)
+        .where(eq(sets.id, setId))
+        .limit(1)
+
+      if (setResults.length === 0) {
+        socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.SET_NOT_FOUND)
+        return
+      }
+
+      const setData = setResults[0]
+      const matchId = setData.matchId
+
+      // Get match and event for authorization
+      const matchResults = await db
+        .select()
+        .from(matches)
+        .where(eq(matches.id, matchId))
+        .limit(1)
+
+      if (matchResults.length === 0) {
+        socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.MATCH_NOT_FOUND)
+        return
+      }
+
+      const match = matchResults[0]
+
+      // Get event for authorization check
+      const eventResults = await db
+        .select()
+        .from(events)
+        .where(eq(events.id, match.eventId))
+        .limit(1)
+
+      if (eventResults.length === 0) {
+        socket.emit(SOCKET_EVENTS.ERROR, 'Event not found')
+        return
+      }
+
+      const event = eventResults[0]
+
+      // Check authorization to update this event
+      const authCheck = await checkEventUpdateAuthorization(userData, {
+        organizationId: event.organizationId,
+      })
+
+      if (!authCheck.authorized) {
+        socket.emit(
+          SOCKET_EVENTS.ERROR,
+          authCheck.error || 'You do not have permission to update this match'
+        )
         return
       }
 
@@ -224,21 +276,6 @@ export class SocketController {
         socket.emit(SOCKET_EVENTS.ERROR, validation.error)
         return
       }
-
-      // Get set data
-      const setResults = await db
-        .select()
-        .from(sets)
-        .where(eq(sets.id, setId))
-        .limit(1)
-
-      if (setResults.length === 0) {
-        socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.SET_NOT_FOUND)
-        return
-      }
-
-      const setData = setResults[0]
-      const matchId = setData.matchId
 
       // Update set
       const updateData: any = {
@@ -309,7 +346,7 @@ export class SocketController {
       }
 
       console.log(
-        `Admin ${userData.id} updated set ${setId} in match ${matchId}`
+        `User ${userData.id} updated set ${setId} in match ${matchId}`
       )
     } catch (error) {
       socket.emit(
@@ -320,7 +357,7 @@ export class SocketController {
   }
 
   /**
-   * Update match (admin only)
+   * Update match (admin/coach/owner only)
    * Supports updating played status and matchDate
    */
   static updateMatch = async (
@@ -330,12 +367,6 @@ export class SocketController {
     data: UpdateMatchData
   ): Promise<void> => {
     try {
-      // Check admin permission
-      if (!userData.isAdmin) {
-        socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.NOT_ADMIN)
-        return
-      }
-
       const { matchId, played, matchDate } = data
 
       if (!matchId) {
@@ -356,6 +387,33 @@ export class SocketController {
       }
 
       const match = matchResults[0]
+
+      // Get event for authorization check
+      const eventResults = await db
+        .select()
+        .from(events)
+        .where(eq(events.id, match.eventId))
+        .limit(1)
+
+      if (eventResults.length === 0) {
+        socket.emit(SOCKET_EVENTS.ERROR, 'Event not found')
+        return
+      }
+
+      const event = eventResults[0]
+
+      // Check authorization to update this event
+      const authCheck = await checkEventUpdateAuthorization(userData, {
+        organizationId: event.organizationId,
+      })
+
+      if (!authCheck.authorized) {
+        socket.emit(
+          SOCKET_EVENTS.ERROR,
+          authCheck.error || 'You do not have permission to update this match'
+        )
+        return
+      }
 
       // Build update object
       const updateData: {
@@ -431,7 +489,7 @@ export class SocketController {
         matchUpdatedData
       )
 
-      console.log(`Admin ${userData.id} updated match ${matchId}`)
+      console.log(`User ${userData.id} updated match ${matchId}`)
     } catch (error) {
       socket.emit(
         SOCKET_EVENTS.ERROR,
@@ -441,7 +499,7 @@ export class SocketController {
   }
 
   /**
-   * Create a new set (admin only)
+   * Create a new set (admin/coach/owner only)
    */
   static createSet = async (
     io: Server,
@@ -450,12 +508,6 @@ export class SocketController {
     data: CreateSetData
   ): Promise<void> => {
     try {
-      // Check admin permission
-      if (!userData.isAdmin) {
-        socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.NOT_ADMIN)
-        return
-      }
-
       const { matchId, setNumber } = data
 
       if (!matchId) {
@@ -477,19 +529,7 @@ export class SocketController {
 
       const match = matchResults[0]
 
-      // Validate match is not completed
-      if (match.played) {
-        socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.MATCH_ALREADY_PLAYED)
-        return
-      }
-
-      // Validate match date is set
-      if (!match.matchDate) {
-        socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.MATCH_DATE_REQUIRED)
-        return
-      }
-
-      // Get event to determine bestOf
+      // Get event for authorization check and bestOf
       const eventResults = await db
         .select()
         .from(events)
@@ -502,6 +542,31 @@ export class SocketController {
       }
 
       const event = eventResults[0]
+
+      // Check authorization to update this event
+      const authCheck = await checkEventUpdateAuthorization(userData, {
+        organizationId: event.organizationId,
+      })
+
+      if (!authCheck.authorized) {
+        socket.emit(
+          SOCKET_EVENTS.ERROR,
+          authCheck.error || 'You do not have permission to create sets for this match'
+        )
+        return
+      }
+
+      // Validate match is not completed
+      if (match.played) {
+        socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.MATCH_ALREADY_PLAYED)
+        return
+      }
+
+      // Validate match date is set
+      if (!match.matchDate) {
+        socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.MATCH_DATE_REQUIRED)
+        return
+      }
       const bestOf = event.bestOf
 
       // Get existing sets for the match
@@ -591,7 +656,7 @@ export class SocketController {
       io.to(`match_${matchId}`).emit(SOCKET_EVENTS.SET_CREATED, setCreatedData)
 
       console.log(
-        `Admin ${userData.id} created set ${createdSet.id} (set ${calculatedSetNumber}) for match ${matchId}`
+        `User ${userData.id} created set ${createdSet.id} (set ${calculatedSetNumber}) for match ${matchId}`
       )
     } catch (error) {
       socket.emit(
