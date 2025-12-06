@@ -48,52 +48,80 @@ app.get('/health', (req, res) => {
 
 // Socket connection handler
 io.on('connection', async (socket) => {
+  console.log(`[Socket] New connection attempt - Socket ID: ${socket.id}`)
+  console.log(`[Socket] Handshake auth:`, socket.handshake.auth)
+  console.log(`[Socket] Transport: ${socket.conn.transport.name}`)
+
   // Handle connection and authentication
   const connectionResult = await SocketController.handleConnection(io, socket)
 
   if (!connectionResult.success) {
+    console.log(
+      `[Socket] Connection failed for ${socket.id}: ${connectionResult.error}`
+    )
     return // Connection failed, socket will be disconnected
   }
 
   const { userData } = connectionResult
 
   if (!userData) {
+    console.log(`[Socket] No userData for ${socket.id}`)
     return
   }
 
+  console.log(`[Socket] User ${userData.id} authenticated successfully`)
+
   // Handle join match event
-  socket.on(SOCKET_EVENTS.JOIN_MATCH, (data) =>
+  socket.on(SOCKET_EVENTS.JOIN_MATCH, (data) => {
+    console.log(`[Socket] JOIN_MATCH event from ${userData.id}:`, data)
     SocketController.joinMatch(socket, userData, data)
-  )
+  })
 
   // Handle leave match event
-  socket.on(SOCKET_EVENTS.LEAVE_MATCH, (data) =>
+  socket.on(SOCKET_EVENTS.LEAVE_MATCH, (data) => {
+    console.log(`[Socket] LEAVE_MATCH event from ${userData.id}:`, data)
     SocketController.leaveMatch(socket, userData, data)
-  )
+  })
+
+  // Handle get match event
+  socket.on(SOCKET_EVENTS.GET_MATCH, (data) => {
+    console.log(`[Socket] GET_MATCH event from ${userData.id}:`, data)
+    SocketController.getMatch(socket, userData, data)
+  })
 
   // Handle update set score event (admin only)
-  socket.on(SOCKET_EVENTS.UPDATE_SET_SCORE, (data) =>
+  socket.on(SOCKET_EVENTS.UPDATE_SET_SCORE, (data) => {
+    console.log(`[Socket] UPDATE_SET_SCORE event from ${userData.id}:`, data)
     SocketController.updateSetScore(io, socket, userData, data)
-  )
+  })
 
   // Handle update match event (admin only)
-  socket.on(SOCKET_EVENTS.UPDATE_MATCH, (data) =>
+  socket.on(SOCKET_EVENTS.UPDATE_MATCH, (data) => {
+    console.log(`[Socket] UPDATE_MATCH event from ${userData.id}:`, data)
     SocketController.updateMatch(io, socket, userData, data)
-  )
+  })
 
   // Handle create set event (admin only)
-  socket.on(SOCKET_EVENTS.CREATE_SET, (data) =>
+  socket.on(SOCKET_EVENTS.CREATE_SET, (data) => {
+    console.log(`[Socket] CREATE_SET event from ${userData.id}:`, data)
     SocketController.createSet(io, socket, userData, data)
-  )
+  })
+
+  // Handle mark set played event (admin only)
+  socket.on(SOCKET_EVENTS.MARK_SET_PLAYED, (data) => {
+    console.log(`[Socket] MARK_SET_PLAYED event from ${userData.id}:`, data)
+    SocketController.markSetPlayed(io, socket, userData, data)
+  })
 
   // Handle disconnection
   socket.on('disconnect', (reason) => {
+    console.log(`[Socket] Disconnect - User: ${userData.id}, Reason: ${reason}`)
     SocketController.handleDisconnect(io, socket)
   })
 
   // Handle errors
   socket.on('error', (error) => {
-    console.error('Socket error:', error)
+    console.error(`[Socket] Error for ${userData.id}:`, error)
     socket.emit(SOCKET_EVENTS.ERROR, {
       message: 'Socket error occurred',
       error: error instanceof Error ? error.message : 'Unknown error',

@@ -1,7 +1,15 @@
 import { Server, Socket } from 'socket.io'
 import { eq, asc } from 'drizzle-orm'
 import { db } from '../config/db.config'
-import { matches, sets, events } from '../db/schema'
+import {
+  matches,
+  sets,
+  events,
+  groups,
+  registrations,
+  registrationPlayers,
+  players,
+} from '../db/schema'
 import { validateSession, UserData } from '../middlewares/auth.middleware'
 import {
   validateSetScore,
@@ -16,6 +24,7 @@ import { SOCKET_EVENTS, ERROR_MESSAGES } from '../config/constants'
 import {
   JoinMatchData,
   LeaveMatchData,
+  GetMatchData,
   UpdateSetScoreData,
   UpdateMatchData,
   MatchScoreUpdatedData,
@@ -24,7 +33,20 @@ import {
   MatchCompletedData,
   CreateSetData,
   SetCreatedData,
+  MatchDataResponse,
+  RegistrationData,
+  MarkSetPlayedData,
+  SetPlayedData,
 } from '../types/socket.types'
+import {
+  isGroupsFormat,
+  isSingleEliminationFormat,
+  handleGroupsMatchCompletion,
+  handleSingleEliminationMatchCompletion,
+  updateGroupCompletionStatus,
+  updateEventCompletedStatus,
+  checkMajorityAndGetWinner,
+} from '../utils/match-completion'
 
 export class SocketController {
   // Static property to store user connections
@@ -145,10 +167,7 @@ export class SocketController {
       // Check authorization to access this match
       const accessCheck = await checkMatchAccess(userData, matchId)
       if (!accessCheck.authorized) {
-        socket.emit(
-          SOCKET_EVENTS.ERROR,
-          accessCheck.error || 'Access denied'
-        )
+        socket.emit(SOCKET_EVENTS.ERROR, accessCheck.error || 'Access denied')
         return
       }
 
@@ -189,6 +208,227 @@ export class SocketController {
         SOCKET_EVENTS.ERROR,
         error instanceof Error ? error.message : 'Unknown error'
       )
+    }
+  }
+
+  /**
+   * Helper to enrich a registration with player data
+   */
+  private static async enrichRegistrationWithPlayers(
+    registrationId: string
+  ): Promise<RegistrationData | null> {
+    // Get registration
+    const regResults = await db
+      .select()
+      .from(registrations)
+      .where(eq(registrations.id, registrationId))
+      .limit(1)
+
+    if (regResults.length === 0) return null
+
+    const registration = regResults[0]
+
+    // Get players for this registration
+    const playerLinks = await db
+      .select()
+      .from(registrationPlayers)
+      .where(eq(registrationPlayers.registrationId, registrationId))
+
+    const playerIds = playerLinks.map((link) => link.playerId)
+    const playerData = []
+
+    for (const playerId of playerIds) {
+      const playerResults = await db
+        .select()
+        .from(players)
+        .where(eq(players.id, playerId))
+        .limit(1)
+
+      if (playerResults.length > 0) {
+        const player = playerResults[0]
+        playerData.push({
+          id: player.id,
+          name: player.name,
+          image: null, // Players table doesn't have image in socket schema
+        })
+      }
+    }
+
+    return {
+      id: registration.id,
+      eventId: registration.eventId,
+      groupId: registration.groupId,
+      seed: registration.seed,
+      matchesWon: registration.matchesWon,
+      matchesLost: registration.matchesLost,
+      setsWon: registration.setsWon,
+      setsLost: registration.setsLost,
+      points: registration.points,
+      qualified: registration.qualified,
+      players: playerData,
+    }
+  }
+
+  /**
+   * Get match details
+   */
+  static getMatch = async (
+    socket: Socket,
+    userData: UserData,
+    data: GetMatchData
+  ): Promise<void> => {
+    try {
+      console.log('[getMatch] Handler called with data:', data)
+      const { matchId } = data
+
+      if (!matchId) {
+        console.log('[getMatch] No matchId provided')
+        socket.emit(SOCKET_EVENTS.ERROR, { message: 'Match ID is required' })
+        return
+      }
+
+      console.log('[getMatch] Checking authorization for match:', matchId)
+      // Check authorization to access this match
+      const accessCheck = await checkMatchAccess(userData, matchId)
+      console.log('[getMatch] Access check result:', accessCheck)
+      if (!accessCheck.authorized) {
+        socket.emit(SOCKET_EVENTS.ERROR, {
+          message: accessCheck.error || 'Access denied',
+        })
+        return
+      }
+
+      // Get match
+      const matchResults = await db
+        .select()
+        .from(matches)
+        .where(eq(matches.id, matchId))
+        .limit(1)
+
+      if (matchResults.length === 0) {
+        socket.emit(SOCKET_EVENTS.ERROR, {
+          message: ERROR_MESSAGES.MATCH_NOT_FOUND,
+        })
+        return
+      }
+
+      const match = matchResults[0]
+
+      // Get event
+      const eventResults = await db
+        .select()
+        .from(events)
+        .where(eq(events.id, match.eventId))
+        .limit(1)
+
+      if (eventResults.length === 0) {
+        socket.emit(SOCKET_EVENTS.ERROR, {
+          message: ERROR_MESSAGES.EVENT_NOT_FOUND,
+        })
+        return
+      }
+
+      const event = eventResults[0]
+
+      // Get sets for the match
+      const matchSets = await db
+        .select()
+        .from(sets)
+        .where(eq(sets.matchId, matchId))
+        .orderBy(asc(sets.setNumber))
+
+      // Get group if exists
+      let group = null
+      if (match.groupId) {
+        const groupResults = await db
+          .select()
+          .from(groups)
+          .where(eq(groups.id, match.groupId))
+          .limit(1)
+        if (groupResults.length > 0) {
+          group = {
+            id: groupResults[0].id,
+            name: groupResults[0].name,
+            completed: groupResults[0].completed,
+          }
+        }
+      }
+
+      // Get registrations with players
+      let registration1: RegistrationData | null = null
+      let registration2: RegistrationData | null = null
+
+      if (match.registration1Id) {
+        registration1 = await SocketController.enrichRegistrationWithPlayers(
+          match.registration1Id
+        )
+      }
+
+      if (match.registration2Id) {
+        registration2 = await SocketController.enrichRegistrationWithPlayers(
+          match.registration2Id
+        )
+      }
+
+      // Determine if BYE match
+      const isByeMatch =
+        match.registration1Id === null || match.registration2Id === null
+
+      // Build response
+      const matchData: MatchDataResponse = {
+        id: match.id,
+        eventId: match.eventId,
+        groupId: match.groupId,
+        round: match.round,
+        matchNumber: match.matchNumber,
+        registration1Id: match.registration1Id,
+        registration2Id: match.registration2Id,
+        matchDate: match.matchDate,
+        played: match.played,
+        winnerId: match.winnerId,
+        bracketPosition: match.bracketPosition,
+        winnerTo: match.winnerTo,
+        winnerToSlot: match.winnerToSlot,
+        createdAt: match.createdAt.toISOString(),
+        updatedAt: match.updatedAt.toISOString(),
+        sets: matchSets.map((s) => ({
+          id: s.id,
+          matchId: s.matchId,
+          setNumber: s.setNumber,
+          registration1Score: s.registration1Score,
+          registration2Score: s.registration2Score,
+          played: s.played,
+          createdAt: s.createdAt.toISOString(),
+          updatedAt: s.updatedAt.toISOString(),
+        })),
+        bestOf: event.bestOf,
+        registration1,
+        registration2,
+        event: {
+          id: event.id,
+          name: event.name,
+          eventType: event.eventType,
+          gender: event.gender,
+          format: event.format,
+          bestOf: event.bestOf,
+          completed: event.completed,
+          organizationId: event.organizationId,
+        },
+        group,
+        isByeMatch,
+      }
+
+      // Emit match data to requesting socket
+      console.log('[getMatch] Emitting match-data to socket:', socket.id)
+      socket.emit(SOCKET_EVENTS.MATCH_DATA, matchData)
+
+      console.log(`[getMatch] User ${userData.id} fetched match ${matchId}`)
+    } catch (error) {
+      console.error('[getMatch] Error fetching match:', error)
+      socket.emit(SOCKET_EVENTS.ERROR, {
+        message:
+          error instanceof Error ? error.message : 'Failed to fetch match',
+      })
     }
   }
 
@@ -551,7 +791,8 @@ export class SocketController {
       if (!authCheck.authorized) {
         socket.emit(
           SOCKET_EVENTS.ERROR,
-          authCheck.error || 'You do not have permission to create sets for this match'
+          authCheck.error ||
+            'You do not have permission to create sets for this match'
         )
         return
       }
@@ -659,6 +900,213 @@ export class SocketController {
         `User ${userData.id} created set ${createdSet.id} (set ${calculatedSetNumber}) for match ${matchId}`
       )
     } catch (error) {
+      socket.emit(
+        SOCKET_EVENTS.ERROR,
+        error instanceof Error ? error.message : 'Unknown error'
+      )
+    }
+  }
+
+  /**
+   * Mark set as played (admin/coach/owner only)
+   * Handles match completion: updates standings for groups, advances winner for SE
+   */
+  static markSetPlayed = async (
+    io: Server,
+    socket: Socket,
+    userData: UserData,
+    data: MarkSetPlayedData
+  ): Promise<void> => {
+    try {
+      const { setId } = data
+
+      if (!setId) {
+        socket.emit(SOCKET_EVENTS.ERROR, 'Set ID is required')
+        return
+      }
+
+      // Get set data
+      const setResults = await db
+        .select()
+        .from(sets)
+        .where(eq(sets.id, setId))
+        .limit(1)
+
+      if (setResults.length === 0) {
+        socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.SET_NOT_FOUND)
+        return
+      }
+
+      const setData = setResults[0]
+      const matchId = setData.matchId
+
+      // Check if set is already played
+      if (setData.played) {
+        socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.SET_ALREADY_PLAYED)
+        return
+      }
+
+      // Get match
+      const matchResults = await db
+        .select()
+        .from(matches)
+        .where(eq(matches.id, matchId))
+        .limit(1)
+
+      if (matchResults.length === 0) {
+        socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.MATCH_NOT_FOUND)
+        return
+      }
+
+      const match = matchResults[0]
+
+      // Get event for authorization and bestOf
+      const eventResults = await db
+        .select()
+        .from(events)
+        .where(eq(events.id, match.eventId))
+        .limit(1)
+
+      if (eventResults.length === 0) {
+        socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.EVENT_NOT_FOUND)
+        return
+      }
+
+      const event = eventResults[0]
+
+      // Check authorization
+      const authCheck = await checkEventUpdateAuthorization(userData, {
+        organizationId: event.organizationId,
+      })
+
+      if (!authCheck.authorized) {
+        socket.emit(
+          SOCKET_EVENTS.ERROR,
+          authCheck.error || 'You do not have permission to update this match'
+        )
+        return
+      }
+
+      // Validate set can be marked as played
+      const playedValidation = await validateSetPlayed(
+        setId,
+        setData.registration1Score,
+        setData.registration2Score
+      )
+
+      if (!playedValidation.valid) {
+        socket.emit(SOCKET_EVENTS.ERROR, playedValidation.error)
+        return
+      }
+
+      // Mark set as played
+      const updatedSet = await db
+        .update(sets)
+        .set({
+          played: true,
+          updatedAt: new Date(),
+        })
+        .where(eq(sets.id, setId))
+        .returning()
+
+      if (updatedSet.length === 0) {
+        socket.emit(SOCKET_EVENTS.ERROR, 'Failed to update set')
+        return
+      }
+
+      const updated = updatedSet[0]
+
+      // Get all sets for the match to check majority
+      const allSets = await db
+        .select()
+        .from(sets)
+        .where(eq(sets.matchId, matchId))
+        .orderBy(asc(sets.setNumber))
+
+      const playedSets = allSets.filter((s) => s.played)
+
+      // Check if match is complete (majority reached)
+      const majorityResult = checkMajorityAndGetWinner(
+        playedSets,
+        event.bestOf,
+        match
+      )
+
+      let matchCompleted = false
+      let winnerId: string | null = null
+
+      if (majorityResult.completed && majorityResult.winnerId) {
+        matchCompleted = true
+        winnerId = majorityResult.winnerId
+
+        // Update match as completed
+        await db
+          .update(matches)
+          .set({
+            played: true,
+            winnerId,
+            updatedAt: new Date(),
+          })
+          .where(eq(matches.id, matchId))
+
+        // Handle format-specific completion logic
+        if (isGroupsFormat(event.format)) {
+          await handleGroupsMatchCompletion(
+            match,
+            event,
+            winnerId,
+            playedSets.map((s) => ({
+              registration1Score: s.registration1Score,
+              registration2Score: s.registration2Score,
+            }))
+          )
+        } else if (isSingleEliminationFormat(event.format)) {
+          await handleSingleEliminationMatchCompletion(match, winnerId)
+        }
+
+        // Update group completion status if applicable
+        if (match.groupId) {
+          await updateGroupCompletionStatus(match.groupId)
+        }
+
+        // Update event completion status
+        await updateEventCompletedStatus(match.eventId)
+
+        // Emit match completed event
+        const matchCompletedData: MatchCompletedData = {
+          matchId,
+          winnerId,
+        }
+        io.to(`match_${matchId}`).emit(
+          SOCKET_EVENTS.MATCH_COMPLETED,
+          matchCompletedData
+        )
+      }
+
+      // Emit set played event
+      const setPlayedData: SetPlayedData = {
+        matchId,
+        set: {
+          id: updated.id,
+          matchId: updated.matchId,
+          setNumber: updated.setNumber,
+          registration1Score: updated.registration1Score,
+          registration2Score: updated.registration2Score,
+          played: updated.played,
+          createdAt: updated.createdAt.toISOString(),
+          updatedAt: updated.updatedAt.toISOString(),
+        },
+        matchCompleted,
+        winnerId,
+      }
+
+      io.to(`match_${matchId}`).emit(SOCKET_EVENTS.SET_PLAYED, setPlayedData)
+
+      console.log(
+        `User ${userData.id} marked set ${setId} as played. Match completed: ${matchCompleted}`
+      )
+    } catch (error) {
+      console.error('[markSetPlayed] Error:', error)
       socket.emit(
         SOCKET_EVENTS.ERROR,
         error instanceof Error ? error.message : 'Unknown error'

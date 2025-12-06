@@ -1,6 +1,6 @@
 import { eq, asc } from 'drizzle-orm'
 import { db } from '../config/db.config'
-import { matches, sets, events } from '../db/schema'
+import { matches, sets, events, Match } from '../db/schema'
 
 export interface SetData {
   id: string
@@ -13,7 +13,24 @@ export interface SetData {
 export interface ValidationResult {
   valid: boolean
   error?: string
-  winnerId?: string
+  winnerId?: string | null
+}
+
+/**
+ * Check if a match is a BYE match (one or both registrations are null)
+ * Computed at runtime - not stored in database (consistent with frontend)
+ */
+export const isByeMatch = (match: Match): boolean => {
+  return match.registration1Id === null || match.registration2Id === null
+}
+
+/**
+ * Get the winner ID for a BYE match (the present player)
+ */
+export const getByeMatchWinner = (match: Match): string | null => {
+  if (!isByeMatch(match)) return null
+  // Return the registration that is present
+  return match.registration1Id || match.registration2Id || null
 }
 
 /**
@@ -57,7 +74,7 @@ export const validateSetScore = async (
     }
   }
 
-  // Get match to check if it's played
+  // Get match to check if it's played or is a BYE match
   const matchResults = await db
     .select()
     .from(matches)
@@ -71,7 +88,17 @@ export const validateSetScore = async (
     }
   }
 
-  if (matchResults[0].played) {
+  const match = matchResults[0]
+
+  // BYE matches cannot have sets edited
+  if (isByeMatch(match)) {
+    return {
+      valid: false,
+      error: 'Cannot edit sets in a BYE match',
+    }
+  }
+
+  if (match.played) {
     return {
       valid: false,
       error: 'Cannot edit sets in a completed match',
@@ -145,10 +172,11 @@ export const validateSetPlayed = async (
 
 /**
  * Validates match completion based on bestOf rules
+ * Handles BYE matches specially - they are auto-completed with the present player as winner
  */
 export const validateMatchCompletion = async (
   matchId: string
-): Promise<ValidationResult & { winnerId?: string }> => {
+): Promise<ValidationResult & { winnerId?: string | null }> => {
   // Get match
   const matchResults = await db
     .select()
@@ -164,6 +192,15 @@ export const validateMatchCompletion = async (
   }
 
   const match = matchResults[0]
+
+  // Handle BYE matches - auto-complete with present player as winner
+  if (isByeMatch(match)) {
+    const byeWinner = getByeMatchWinner(match)
+    return {
+      valid: true,
+      winnerId: byeWinner,
+    }
+  }
 
   // Get event for bestOf
   const eventResults = await db
@@ -194,7 +231,8 @@ export const validateMatchCompletion = async (
   if (unplayedSets.length > 0) {
     return {
       valid: false,
-      error: 'Cannot mark match as played: all sets must be marked as played first',
+      error:
+        'Cannot mark match as played: all sets must be marked as played first',
     }
   }
 
@@ -242,7 +280,7 @@ export const validateMatchCompletion = async (
 
 /**
  * Checks if a player has reached majority and match should be auto-completed
- * 
+ *
  * @deprecated This function is no longer used by the socket service.
  * Match completion is handled by the REST API to ensure registration standings
  * are updated correctly. This function is kept for reference but should not be called.
@@ -332,4 +370,3 @@ export const checkMajorityAndCompleteMatch = async (
 
   return { winnerId: null, completed: false }
 }
-

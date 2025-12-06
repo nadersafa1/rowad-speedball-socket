@@ -64,28 +64,93 @@ export const session = pgTable('session', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 })
 
+// Players Table
+export const players = pgTable('players', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: varchar('name', { length: 255 }).notNull(),
+  nameRtl: varchar('name_rtl', { length: 255 }),
+  dateOfBirth: date('date_of_birth').notNull(),
+  gender: text('gender').notNull(),
+  preferredHand: text('preferred_hand').notNull(),
+  teamLevel: text('team_level').notNull().default('team_c'),
+  userId: uuid('user_id').references(() => user.id, { onDelete: 'set null' }),
+  organizationId: uuid('organization_id').references(() => organization.id, {
+    onDelete: 'set null',
+  }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})
+
 // Events Table
+// Note: Only include columns that exist in the actual database
+// This schema must stay in sync with the frontend schema
 export const events = pgTable('events', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: varchar('name', { length: 255 }).notNull(),
-  eventType: text('event_type', { enum: ['singles', 'doubles'] }).notNull(),
-  gender: text('gender', { enum: ['male', 'female', 'mixed'] }).notNull(),
-  groupMode: text('group_mode', { enum: ['single', 'multiple'] }).notNull(),
-  visibility: text('visibility', { enum: ['public', 'private'] })
-    .notNull()
-    .default('public'),
+  eventType: text('event_type').notNull(),
+  gender: text('gender').notNull(),
+  visibility: text('visibility').notNull().default('public'),
   organizationId: uuid('organization_id').references(() => organization.id, {
     onDelete: 'cascade',
   }),
   registrationStartDate: date('registration_start_date'),
   registrationEndDate: date('registration_end_date'),
-  eventDates: text('event_dates').array(), // Array of date strings
+  eventDates: text('event_dates').array(),
   bestOf: integer('best_of').notNull(),
   pointsPerWin: integer('points_per_win').notNull().default(3),
   pointsPerLoss: integer('points_per_loss').notNull().default(0),
+  format: text('format', {
+    enum: ['groups', 'single-elimination', 'groups-knockout'],
+  })
+    .notNull()
+    .default('groups'),
   completed: boolean('completed').notNull().default(false),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})
+
+// Groups Table
+export const groups = pgTable('groups', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  eventId: uuid('event_id')
+    .notNull()
+    .references(() => events.id, { onDelete: 'cascade' }),
+  name: varchar('name', { length: 10 }).notNull(),
+  completed: boolean('completed').notNull().default(false),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})
+
+// Registrations Table
+export const registrations = pgTable('registrations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  eventId: uuid('event_id')
+    .notNull()
+    .references(() => events.id, { onDelete: 'cascade' }),
+  groupId: uuid('group_id').references(() => groups.id, {
+    onDelete: 'set null',
+  }),
+  seed: integer('seed'),
+  matchesWon: integer('matches_won').notNull().default(0),
+  matchesLost: integer('matches_lost').notNull().default(0),
+  setsWon: integer('sets_won').notNull().default(0),
+  setsLost: integer('sets_lost').notNull().default(0),
+  points: integer('points').notNull().default(0),
+  qualified: boolean('qualified').notNull().default(false),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})
+
+// Registration Players Junction Table
+export const registrationPlayers = pgTable('registration_players', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  registrationId: uuid('registration_id')
+    .notNull()
+    .references(() => registrations.id, { onDelete: 'cascade' }),
+  playerId: uuid('player_id')
+    .notNull()
+    .references(() => players.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 })
 
 // Matches Table
@@ -97,11 +162,16 @@ export const matches = pgTable('matches', {
   groupId: uuid('group_id'),
   round: integer('round').notNull(),
   matchNumber: integer('match_number').notNull(),
-  registration1Id: uuid('registration1_id').notNull(),
-  registration2Id: uuid('registration2_id').notNull(),
+  // Nullable for BYE matches in single elimination
+  registration1Id: uuid('registration1_id'),
+  registration2Id: uuid('registration2_id'),
   matchDate: date('match_date'),
   played: boolean('played').notNull().default(false),
   winnerId: uuid('winner_id'),
+  // Bracket linking for single elimination
+  bracketPosition: integer('bracket_position'),
+  winnerTo: uuid('winner_to'),
+  winnerToSlot: integer('winner_to_slot'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 })
@@ -125,7 +195,10 @@ export type User = typeof user.$inferSelect
 export type Session = typeof session.$inferSelect
 export type Organization = typeof organization.$inferSelect
 export type Member = typeof member.$inferSelect
+export type Player = typeof players.$inferSelect
 export type Event = typeof events.$inferSelect
+export type Group = typeof groups.$inferSelect
+export type Registration = typeof registrations.$inferSelect
+export type RegistrationPlayer = typeof registrationPlayers.$inferSelect
 export type Match = typeof matches.$inferSelect
 export type Set = typeof sets.$inferSelect
-

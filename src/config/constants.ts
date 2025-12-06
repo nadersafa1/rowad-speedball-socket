@@ -3,16 +3,20 @@ export const SOCKET_EVENTS = {
   // Client -> Server
   JOIN_MATCH: 'join-match',
   LEAVE_MATCH: 'leave-match',
+  GET_MATCH: 'get-match',
   UPDATE_SET_SCORE: 'update-set-score',
   UPDATE_MATCH: 'update-match',
   CREATE_SET: 'create-set',
+  MARK_SET_PLAYED: 'mark-set-played',
 
   // Server -> Client
+  MATCH_DATA: 'match-data',
   MATCH_SCORE_UPDATED: 'match-score-updated',
   MATCH_UPDATED: 'match-updated',
   SET_COMPLETED: 'set-completed',
   MATCH_COMPLETED: 'match-completed',
   SET_CREATED: 'set-created',
+  SET_PLAYED: 'set-played',
   ERROR: 'err',
   CONNECT_SUCCESS: 'connect-success',
 } as const

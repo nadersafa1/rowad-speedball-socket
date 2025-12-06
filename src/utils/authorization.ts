@@ -54,7 +54,7 @@ export const buildOrganizationContext = async (
     if (membership) {
       role = membership.role
       const roleLower = membership.role.toLowerCase()
-      
+
       // Set role flags (matches frontend OrganizationRole enum)
       // super_admin is treated as admin for authorization purposes
       isAdmin = roleLower === 'admin' || roleLower === 'super_admin'
@@ -149,10 +149,7 @@ export const checkEventUpdateAuthorization = async (
 
   // Authorization: Only system admins, org admins, org owners, and org coaches can update events
   // Additionally, org members (admin/owner/coach) must have an active organization
-  if (
-    (!isAdmin && !isOwner && !isCoach) ||
-    !organization?.id
-  ) {
+  if ((!isAdmin && !isOwner && !isCoach) || !organization?.id) {
     return {
       authorized: false,
       error:
@@ -196,9 +193,12 @@ export const checkMatchAccess = async (
 
     const match = matchResult[0]
 
-    // Get event
+    // Get event - only select columns that exist in database
     const eventResults = await db
-      .select()
+      .select({
+        organizationId: events.organizationId,
+        visibility: events.visibility,
+      })
       .from(events)
       .where(eq(events.id, match.eventId))
       .limit(1)
@@ -225,4 +225,3 @@ export const checkMatchAccess = async (
     }
   }
 }
-
