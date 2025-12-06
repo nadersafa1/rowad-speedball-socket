@@ -1,7 +1,7 @@
 import { Server, Socket } from 'socket.io'
-import { eq, asc } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { db } from '../config/db.config'
-import { matches, sets, events, groups } from '../db/schema'
+import { matches, events } from '../db/schema'
 import { UserData } from '../middlewares/auth.middleware'
 import { validateMatchCompletion } from '../utils/validation'
 import { checkMatchAccess, checkEventUpdateAuthorization } from '../utils/authorization'
@@ -13,7 +13,7 @@ import {
   MatchUpdatedData,
   MatchCompletedData,
 } from '../types/socket.types'
-import { enrichRegistrationWithPlayers } from '../services/registration.service'
+import { enrichMatch } from '../services/match-enrichment.service'
 
 export const getMatch = async (
   socket: Socket,
@@ -54,78 +54,8 @@ export const getMatch = async (
 
     const event = eventResults[0]
 
-    // Get sets
-    const matchSets = await db
-      .select()
-      .from(sets)
-      .where(eq(sets.matchId, matchId))
-      .orderBy(asc(sets.setNumber))
-
-    // Get group if exists
-    let group = null
-    if (match.groupId) {
-      const groupResults = await db.select().from(groups).where(eq(groups.id, match.groupId)).limit(1)
-      if (groupResults.length > 0) {
-        group = {
-          id: groupResults[0].id,
-          name: groupResults[0].name,
-          completed: groupResults[0].completed,
-        }
-      }
-    }
-
-    // Get registrations with players
-    const registration1 = match.registration1Id
-      ? await enrichRegistrationWithPlayers(match.registration1Id)
-      : null
-    const registration2 = match.registration2Id
-      ? await enrichRegistrationWithPlayers(match.registration2Id)
-      : null
-
-    const isByeMatch = match.registration1Id === null || match.registration2Id === null
-
-    const matchData: MatchDataResponse = {
-      id: match.id,
-      eventId: match.eventId,
-      groupId: match.groupId,
-      round: match.round,
-      matchNumber: match.matchNumber,
-      registration1Id: match.registration1Id,
-      registration2Id: match.registration2Id,
-      matchDate: match.matchDate,
-      played: match.played,
-      winnerId: match.winnerId,
-      bracketPosition: match.bracketPosition,
-      winnerTo: match.winnerTo,
-      winnerToSlot: match.winnerToSlot,
-      createdAt: match.createdAt.toISOString(),
-      updatedAt: match.updatedAt.toISOString(),
-      sets: matchSets.map((s) => ({
-        id: s.id,
-        matchId: s.matchId,
-        setNumber: s.setNumber,
-        registration1Score: s.registration1Score,
-        registration2Score: s.registration2Score,
-        played: s.played,
-        createdAt: s.createdAt.toISOString(),
-        updatedAt: s.updatedAt.toISOString(),
-      })),
-      bestOf: event.bestOf,
-      registration1,
-      registration2,
-      event: {
-        id: event.id,
-        name: event.name,
-        eventType: event.eventType,
-        gender: event.gender,
-        format: event.format,
-        bestOf: event.bestOf,
-        completed: event.completed,
-        organizationId: event.organizationId,
-      },
-      group,
-      isByeMatch,
-    }
+    // Use shared enrichment service
+    const matchData = await enrichMatch(match, event)
 
     socket.emit(SOCKET_EVENTS.MATCH_DATA, matchData)
     console.log(`User ${userData.id} fetched match ${matchId}`)
