@@ -12,7 +12,6 @@ import {
   MarkSetPlayedData,
   SetCreatedData,
   MatchScoreUpdatedData,
-  SetCompletedData,
   SetPlayedData,
   MatchCompletedData,
 } from '../types/socket.types'
@@ -40,7 +39,11 @@ export const createSet = async (
       return
     }
 
-    const matchResults = await db.select().from(matches).where(eq(matches.id, matchId)).limit(1)
+    const matchResults = await db
+      .select()
+      .from(matches)
+      .where(eq(matches.id, matchId))
+      .limit(1)
 
     if (matchResults.length === 0) {
       socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.MATCH_NOT_FOUND)
@@ -49,7 +52,11 @@ export const createSet = async (
 
     const match = matchResults[0]
 
-    const eventResults = await db.select().from(events).where(eq(events.id, match.eventId)).limit(1)
+    const eventResults = await db
+      .select()
+      .from(events)
+      .where(eq(events.id, match.eventId))
+      .limit(1)
 
     if (eventResults.length === 0) {
       socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.EVENT_NOT_FOUND)
@@ -91,7 +98,10 @@ export const createSet = async (
     }
 
     if (existingSets.some((s) => s.setNumber === calculatedSetNumber)) {
-      socket.emit(SOCKET_EVENTS.ERROR, `Set number ${calculatedSetNumber} already exists`)
+      socket.emit(
+        SOCKET_EVENTS.ERROR,
+        `Set number ${calculatedSetNumber} already exists`
+      )
       return
     }
 
@@ -101,7 +111,10 @@ export const createSet = async (
         .filter((s) => !s.played)
 
       if (unplayedPrevious.length > 0) {
-        socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.PREVIOUS_SETS_NOT_PLAYED)
+        socket.emit(
+          SOCKET_EVENTS.ERROR,
+          ERROR_MESSAGES.PREVIOUS_SETS_NOT_PLAYED
+        )
         return
       }
     }
@@ -139,9 +152,14 @@ export const createSet = async (
     }
 
     io.to(`match_${matchId}`).emit(SOCKET_EVENTS.SET_CREATED, setCreatedData)
-    console.log(`User ${userData.id} created set ${createdSet.id} for match ${matchId}`)
+    console.log(
+      `User ${userData.id} created set ${createdSet.id} for match ${matchId}`
+    )
   } catch (error) {
-    socket.emit(SOCKET_EVENTS.ERROR, error instanceof Error ? error.message : 'Unknown error')
+    socket.emit(
+      SOCKET_EVENTS.ERROR,
+      error instanceof Error ? error.message : 'Unknown error'
+    )
   }
 }
 
@@ -159,7 +177,11 @@ export const updateSetScore = async (
       return
     }
 
-    const setResults = await db.select().from(sets).where(eq(sets.id, setId)).limit(1)
+    const setResults = await db
+      .select()
+      .from(sets)
+      .where(eq(sets.id, setId))
+      .limit(1)
 
     if (setResults.length === 0) {
       socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.SET_NOT_FOUND)
@@ -169,7 +191,11 @@ export const updateSetScore = async (
     const setData = setResults[0]
     const matchId = setData.matchId
 
-    const matchResults = await db.select().from(matches).where(eq(matches.id, matchId)).limit(1)
+    const matchResults = await db
+      .select()
+      .from(matches)
+      .where(eq(matches.id, matchId))
+      .limit(1)
 
     if (matchResults.length === 0) {
       socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.MATCH_NOT_FOUND)
@@ -178,7 +204,11 @@ export const updateSetScore = async (
 
     const match = matchResults[0]
 
-    const eventResults = await db.select().from(events).where(eq(events.id, match.eventId)).limit(1)
+    const eventResults = await db
+      .select()
+      .from(events)
+      .where(eq(events.id, match.eventId))
+      .limit(1)
 
     if (eventResults.length === 0) {
       socket.emit(SOCKET_EVENTS.ERROR, 'Event not found')
@@ -196,7 +226,11 @@ export const updateSetScore = async (
       return
     }
 
-    const validation = await validateSetScore(setId, registration1Score, registration2Score)
+    const validation = await validateSetScore(
+      setId,
+      registration1Score,
+      registration2Score
+    )
 
     if (!validation.valid) {
       socket.emit(SOCKET_EVENTS.ERROR, validation.error)
@@ -210,7 +244,11 @@ export const updateSetScore = async (
     }
 
     if (played === true && !setData.played) {
-      const playedValidation = await validateSetPlayed(setId, registration1Score, registration2Score)
+      const playedValidation = await validateSetPlayed(
+        setId,
+        registration1Score,
+        registration2Score
+      )
 
       if (!playedValidation.valid) {
         socket.emit(SOCKET_EVENTS.ERROR, playedValidation.error)
@@ -242,20 +280,17 @@ export const updateSetScore = async (
       played: updated.played,
     }
 
-    io.to(`match_${matchId}`).emit(SOCKET_EVENTS.MATCH_SCORE_UPDATED, matchScoreData)
-
-    if (updateData.played && !setData.played) {
-      const setCompletedData: SetCompletedData = {
-        matchId,
-        setId: updated.id,
-        setNumber: updated.setNumber,
-      }
-      io.to(`match_${matchId}`).emit(SOCKET_EVENTS.SET_COMPLETED, setCompletedData)
-    }
+    io.to(`match_${matchId}`).emit(
+      SOCKET_EVENTS.MATCH_SCORE_UPDATED,
+      matchScoreData
+    )
 
     console.log(`User ${userData.id} updated set ${setId} in match ${matchId}`)
   } catch (error) {
-    socket.emit(SOCKET_EVENTS.ERROR, error instanceof Error ? error.message : 'Unknown error')
+    socket.emit(
+      SOCKET_EVENTS.ERROR,
+      error instanceof Error ? error.message : 'Unknown error'
+    )
   }
 }
 
@@ -273,7 +308,11 @@ export const markSetPlayed = async (
       return
     }
 
-    const setResults = await db.select().from(sets).where(eq(sets.id, setId)).limit(1)
+    const setResults = await db
+      .select()
+      .from(sets)
+      .where(eq(sets.id, setId))
+      .limit(1)
 
     if (setResults.length === 0) {
       socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.SET_NOT_FOUND)
@@ -288,7 +327,11 @@ export const markSetPlayed = async (
       return
     }
 
-    const matchResults = await db.select().from(matches).where(eq(matches.id, matchId)).limit(1)
+    const matchResults = await db
+      .select()
+      .from(matches)
+      .where(eq(matches.id, matchId))
+      .limit(1)
 
     if (matchResults.length === 0) {
       socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.MATCH_NOT_FOUND)
@@ -297,7 +340,11 @@ export const markSetPlayed = async (
 
     const match = matchResults[0]
 
-    const eventResults = await db.select().from(events).where(eq(events.id, match.eventId)).limit(1)
+    const eventResults = await db
+      .select()
+      .from(events)
+      .where(eq(events.id, match.eventId))
+      .limit(1)
 
     if (eventResults.length === 0) {
       socket.emit(SOCKET_EVENTS.ERROR, ERROR_MESSAGES.EVENT_NOT_FOUND)
@@ -347,7 +394,11 @@ export const markSetPlayed = async (
 
     const playedSets = allSets.filter((s) => s.played)
 
-    const majorityResult = checkMajorityAndGetWinner(playedSets, event.bestOf, match)
+    const majorityResult = checkMajorityAndGetWinner(
+      playedSets,
+      event.bestOf,
+      match
+    )
 
     let matchCompleted = false
     let winnerId: string | null = null
@@ -382,7 +433,10 @@ export const markSetPlayed = async (
       await updateEventCompletedStatus(match.eventId)
 
       const matchCompletedData: MatchCompletedData = { matchId, winnerId }
-      io.to(`match_${matchId}`).emit(SOCKET_EVENTS.MATCH_COMPLETED, matchCompletedData)
+      io.to(`match_${matchId}`).emit(
+        SOCKET_EVENTS.MATCH_COMPLETED,
+        matchCompletedData
+      )
     }
 
     const setPlayedData: SetPlayedData = {
@@ -402,10 +456,14 @@ export const markSetPlayed = async (
     }
 
     io.to(`match_${matchId}`).emit(SOCKET_EVENTS.SET_PLAYED, setPlayedData)
-    console.log(`User ${userData.id} marked set ${setId} as played. Match completed: ${matchCompleted}`)
+    console.log(
+      `User ${userData.id} marked set ${setId} as played. Match completed: ${matchCompleted}`
+    )
   } catch (error) {
     console.error('[markSetPlayed] Error:', error)
-    socket.emit(SOCKET_EVENTS.ERROR, error instanceof Error ? error.message : 'Unknown error')
+    socket.emit(
+      SOCKET_EVENTS.ERROR,
+      error instanceof Error ? error.message : 'Unknown error'
+    )
   }
 }
-

@@ -13,7 +13,6 @@ export const SOCKET_EVENTS = {
   MATCH_DATA: 'match-data',
   MATCH_SCORE_UPDATED: 'match-score-updated',
   MATCH_UPDATED: 'match-updated',
-  SET_COMPLETED: 'set-completed',
   MATCH_COMPLETED: 'match-completed',
   SET_CREATED: 'set-created',
   SET_PLAYED: 'set-played',
@@ -38,6 +37,6 @@ export const ERROR_MESSAGES = {
   MATCH_ALREADY_PLAYED: 'Match is already completed',
   MATCH_DATE_REQUIRED: 'Match date must be set before creating sets',
   MAX_SETS_REACHED: 'Maximum number of sets reached for this match',
-  PREVIOUS_SETS_NOT_PLAYED: 'All previous sets must be played before creating a new set',
+  PREVIOUS_SETS_NOT_PLAYED:
+    'All previous sets must be played before creating a new set',
 } as const
-

@@ -1,5 +1,10 @@
 // Server -> Client response types
-import { SetData, RegistrationData, EventData, GroupData } from './entities.types'
+import {
+  SetData,
+  RegistrationData,
+  EventData,
+  GroupData,
+} from './entities.types'
 
 export interface MatchScoreUpdatedData {
   matchId: string
@@ -15,12 +20,6 @@ export interface MatchUpdatedData {
   played?: boolean
   matchDate?: string
   winnerId?: string | null
-}
-
-export interface SetCompletedData {
-  matchId: string
-  setId: string
-  setNumber: number
 }
 
 export interface MatchCompletedData {
@@ -84,4 +83,3 @@ export interface ErrorData {
   message: string
   error?: string
 }
-
