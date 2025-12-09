@@ -18,8 +18,10 @@ import {
 import {
   isGroupsFormat,
   isSingleEliminationFormat,
+  isDoubleEliminationFormat,
   handleGroupsMatchCompletion,
   handleSingleEliminationMatchCompletion,
+  handleDoubleEliminationMatchCompletion,
   updateGroupCompletionStatus,
   updateEventCompletedStatus,
   checkMajorityAndGetWinner,
@@ -424,6 +426,8 @@ export const markSetPlayed = async (
         )
       } else if (isSingleEliminationFormat(event.format)) {
         await handleSingleEliminationMatchCompletion(match, winnerId)
+      } else if (isDoubleEliminationFormat(event.format)) {
+        await handleDoubleEliminationMatchCompletion(match, winnerId)
       }
 
       if (match.groupId) {
